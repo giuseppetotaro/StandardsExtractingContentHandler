@@ -11,7 +11,7 @@
 #
 
 function usage() {
-	echo "Usage: run.sh /path/to/input"
+	echo "Usage: run.sh /path/to/input threshold"
 	exit 1
 }
 
@@ -28,11 +28,12 @@ then
 	exit 1
 fi
 
-if [ $# -lt 1 ]
+if [ $# -lt 2 ]
 then
 	usage
 fi
 
 INPUT="$1"
+THRESHOLD="$2"
 
-java -cp ./lib/tika-app-1.16.jar:./bin org.apache.tika.sax.StandardsExtractionExample $INPUT
+java -cp ./lib/tika-app-1.16.jar:./bin StandardsExtractor "$INPUT" $THRESHOLD 2> /dev/null
