@@ -1,5 +1,4 @@
 import java.io.BufferedInputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringWriter;
 import java.nio.file.Files;
@@ -10,7 +9,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.tika.exception.TikaException;
-import org.apache.tika.fork.ForkParser;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.serialization.JsonMetadata;
 import org.apache.tika.parser.AutoDetectParser;
@@ -19,9 +17,9 @@ import org.apache.tika.parser.Parser;
 import org.apache.tika.parser.ocr.TesseractOCRConfig;
 import org.apache.tika.parser.pdf.PDFParserConfig;
 import org.apache.tika.sax.BodyContentHandler;
+import org.apache.tika.sax.RomanNumeral;
 import org.apache.tika.sax.StandardsExtractingContentHandler;
 import org.apache.tika.sax.StandardsExtractionExample;
-import org.xml.sax.SAXException;
 
 /**
  * StandardsExtractor performs the extraction of the scope within the given 
@@ -31,7 +29,8 @@ import org.xml.sax.SAXException;
  */
 public class StandardsExtractor {
 	public static final String SCOPE = "scope";
-	private static final String REGEX_SCOPE = "(?<index>(\\d\\.?)+)\\p{Blank}+(SCOPE|Scope)";
+	private static final String REGEX_ROMAN_NUMERALS = "(CM|CD|D?C{1,3})|(XC|XL|L?X{1,3})|(IX|IV|V?I{1,3})";
+	private static final String REGEX_SCOPE = "(?<index>((\\d+|(" + REGEX_ROMAN_NUMERALS + ")+)\\.?)+)\\p{Blank}+(SCOPE|Scope)";
 
 	public static void main(String[] args) {
 		if (args.length < 2) {
@@ -70,7 +69,7 @@ public class StandardsExtractor {
 	
 	private static Metadata process(Path input, double threshold) throws Exception {
 		Parser parser = new AutoDetectParser();
-		ForkParser forkParser = new ForkParser(StandardsExtractor.class.getClassLoader(), parser);
+//		ForkParser forkParser = new ForkParser(StandardsExtractor.class.getClassLoader(), parser);
 		Metadata metadata = new Metadata();
 		StandardsExtractingContentHandler handler = new StandardsExtractingContentHandler(new BodyContentHandler(-1), metadata);
 		handler.setThreshold(threshold);
@@ -99,35 +98,62 @@ public class StandardsExtractor {
 		Pattern patternScope = Pattern.compile(REGEX_SCOPE);
 		Matcher matcherScope = patternScope.matcher(text);
 		
+		Matcher matchResult = null;
 		boolean match = false;
 		String scope = "";
 		
-		// Gets the second occurrence of SCOPE
-		for (int i = 0; i < 2; i++) {
-			match = matcherScope.find();
+//		// Gets the second occurrence of SCOPE
+//		for (int i = 0; i < 2; i++) {
+//			match = matcherScope.find();
+		
+//		}
+		// Gets the last occurrence of scope
+		for (int i = 0; i < 2 && (match = matcherScope.find()); i++) {
+			matchResult = (Matcher)matcherScope.toMatchResult();
 		}
 		
-		if (match) {
-			int start = matcherScope.end();
-			String index = matcherScope.group("index");
-			
+		if (matchResult != null && !matchResult.group().isEmpty()) {
+			int start = matchResult.end();
+			String index = matchResult.group("index");
+						
 			int end = text.length() - 1;
 			match = false;
+			String endsWithDot = (index.substring(index.length()-1).equals(".")) ? "." : "";
 			String[] parts = index.split("\\.");
 			
 			do {
+//				if (parts.length > 0) {
+//					int partsLength = parts.length;
+//					int subindex = Integer.parseInt(parts[--partsLength]);
+//					while (subindex++ == 0 && partsLength > 0) {
+//						subindex = Integer.parseInt(parts[--partsLength]);
+//					}
+//					parts[partsLength] = Integer.toString(subindex);
+//					index = String.join(".", parts) + endsWithDot;
+//				}
+				
 				if (parts.length > 0) {
-//					int subindex = Integer.parseInt(parts[parts.length-1]) + 1;
 					int partsLength = parts.length;
-					int subindex = Integer.parseInt(parts[--partsLength]);
-					while (subindex++ == 0 && partsLength > 0) {
-						subindex = Integer.parseInt(parts[--partsLength]);
-					}
-					parts[partsLength] = Integer.toString(subindex);
-					index = String.join(".", parts);
+					int subIndex = 0;
+					RomanNumeral romanNumeral = null;
+					boolean roman = false;
+					
+					do {
+						String subindexString = parts[--partsLength];
+						try {
+							romanNumeral = new RomanNumeral(subindexString);
+							subIndex = romanNumeral.toInt();
+							roman = true;
+						} catch (NumberFormatException e) {
+							subIndex = Integer.parseInt(subindexString);
+						}
+					} while (subIndex++ == 0 && partsLength > 0);
+					
+					parts[partsLength] = (roman) ? new RomanNumeral(subIndex).toString() : Integer.toString(subIndex);
+					index = String.join(".", parts) + endsWithDot;
 				}
 				
-				Pattern patternNextHeader = Pattern.compile(index + "\\.?\\p{Blank}+([A-Z]([A-Za-z]+\\s?)*)");
+				Pattern patternNextHeader = Pattern.compile(index + "\\p{Blank}+([A-Z]([A-Za-z]+\\s?)*)");
 				Matcher matcherNextHeader = patternNextHeader.matcher(text);
 				
 				if (match = matcherNextHeader.find(start)) {
